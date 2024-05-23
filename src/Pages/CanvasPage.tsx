@@ -1,6 +1,7 @@
 import React, {useRef, useEffect, useState} from 'react';
 import {useLocation} from "react-router-dom";
 import axios from "axios";
+import {Button} from "react-bootstrap";
 
 function CanvasPage() {
     const location = useLocation();
@@ -28,51 +29,81 @@ function CanvasPage() {
     const [canvasOffset, setCanvasOffset] = useState({x: 0, y: 0})
     const backgroundRef = useRef<HTMLImageElement>(null!);
 
-    interface Label {
-        id: string;
-        coordinates: {
-            x: number;
-            y: number;
-            w: number;
-            h: number;
-        };
+    function convertRectanglesToString(rectangles: any[]) {
+        return rectangles.map(rect => {
+            const x = (rect.x + rect.width / 2) / backgroundRef.current.width;
+            const y = (rect.y + rect.height / 2) / backgroundRef.current.height;
+            const w = rect.width / backgroundRef.current.width;
+            const h = rect.height / backgroundRef.current.height;
+            return `${rect.name} ${x.toFixed(6)} ${y.toFixed(6)} ${w.toFixed(6)} ${h.toFixed(6)}`;
+        }).join('\n');
+
     }
 
-    async function fetchData() {
-        await axios.get<{ id: number, file: string, image: number }[]>('http://127.0.0.1:8000/api/labels/', {
-            params: {image_id: imageID},
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Token ${localStorage.getItem('token')}`,
-            }
-        }).then(res => {
-            const url = res.data[0].file
-            axios.get(url,{
-                responseType: 'text',
+    function saveData() {
+        if (inputPos) return
+        const updatedText = convertRectanglesToString(rectangles);
+        axios.patch(`http://127.0.0.1:8000/api/labels/update-label/`,
+            {file: updatedText, image_id: imageID}, {
                 headers: {
-                'Content-Type': 'text/plain',
-                'Authorization': `Token ${localStorage.getItem('token')}`,
-            }
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${localStorage.getItem('token')}`,
+                }
             }).then(res => {
-                const text = res.data
-                const lines = text.trim().split('\n');
-                const newRectangles=lines.map((line: { split: (arg0: string) => [any, any, any, any, any]; })=>{
-                    const [id, x, y, w, h] = line.split(' ');
-                    return{
+            console.log("Data saved successfully:", res.data);
+        }).catch(err => {
+            console.error("Error saving data:", err);
+        });
+    }
+
+    useEffect(() => {
+        const source = axios.CancelToken.source();
+
+        function fetchData() {
+            axios.get<{ id: number, file: string, image: number }[]>('http://127.0.0.1:8000/api/labels/', {
+                params: {image_id: imageID},
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${localStorage.getItem('token')}`,
+                },
+                cancelToken: source.token,
+            }).then(res => {
+                const url = res.data[0].file
+                console.log(url)
+                axios.get(url, {
+                    cancelToken: source.token,
+                    responseType: 'text',
+                    headers: {
+                        'Content-Type': 'text/plain',
+                        'Authorization': `Token ${localStorage.getItem('token')}`,
+                    }
+                }).then(res => {
+                    const text = res.data
+                    if (text.trim() === '') {
+                        console.log("Text is empty. No rectangles created.");
+                        return;
+                    }
+                    const lines = text.trim().split('\n');
+                    console.log(lines)
+                    const newRectangles = lines.map((line: { split: (arg0: string) => [any, any, any, any, any]; }) => {
+                        const [id, x, y, w, h] = line.split(' ');
+                        return {
                             x: (parseFloat(x) * backgroundRef.current.width) - (parseFloat(w) * backgroundRef.current.width) / 2,
                             y: (parseFloat(y) * backgroundRef.current.height) - (parseFloat(h) * backgroundRef.current.height) / 2,
                             width: parseFloat(w) * backgroundRef.current.width,
                             height: parseFloat(h) * backgroundRef.current.height,
                             name: id,
                         }
+                    })
+                    setRectangles(oldArray => [...oldArray, ...newRectangles])
+                }).catch(err => {
+                    console.log(err)
                 })
-                setRectangles(oldArray=>[...oldArray,...newRectangles])
+
+            }).catch(err => {
+                console.log(err)
             })
-
-        })
-    }
-
-    useEffect(() => {
+        }
 
         if (!backgroundRef.current) {
             backgroundRef.current = new Image();
@@ -91,6 +122,9 @@ function CanvasPage() {
             }
         }
         fetchData()
+        return function cleanup() {
+            source.cancel()
+        }
     }, []);
 
     useEffect(() => {
@@ -130,6 +164,7 @@ function CanvasPage() {
         };
         draw();
     }, [rectangles, isDrawing, startPos, currentPos])
+
 
     function rectangleIsClicked() {
         const x = currentPos.x
@@ -174,10 +209,10 @@ function CanvasPage() {
         if (inputPos) return;
         setIsDrawing(false);
         const newRectangle = {
-            x: startPos.x,
-            y: startPos.y,
-            width: currentPos.x - startPos.x,
-            height: currentPos.y - startPos.y
+            x: startPos.x < currentPos.x ? startPos.x : currentPos.x,
+            y: startPos.y < currentPos.y ? startPos.y : currentPos.y,
+            width: (currentPos.x - startPos.x) > 0 ? currentPos.x - startPos.x : startPos.x - currentPos.x,
+            height: (currentPos.y - startPos.y) > 0 ? currentPos.y - startPos.y : startPos.y - currentPos.y
         };
         setRectangles([...rectangles, newRectangle]);
         setInputPos({x: currentPos.x, y: currentPos.y});
@@ -207,6 +242,10 @@ function CanvasPage() {
     };
     return (
         <>
+            <Button onClick={saveData}
+                    style={{position: 'absolute', top: window.innerHeight / 2, left: window.innerWidth / 10, zIndex:11}}>
+                Save
+            </Button>
             <canvas
                 style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
                 ref={canvasRefBG}
