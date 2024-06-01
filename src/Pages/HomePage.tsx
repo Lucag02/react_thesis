@@ -5,9 +5,11 @@ import React, {useEffect} from 'react';
 import ImageCard from "../Components/ImageCard";
 import {useState} from 'react'
 import Form from 'react-bootstrap/Form';
-import axios from "axios";
+import axios, {Axios} from "axios";
 import {useNavigate, useParams} from "react-router-dom";
 import plus from '../assets/plus.png'
+import missing from '../assets/missing-image.png'
+import './HomePage.css'
 
 function HomePage() {
     const navigate = useNavigate()
@@ -17,46 +19,58 @@ function HomePage() {
     const [username, setUsername] = useState<String>('')
     const [pkUser, setPkUser] = useState("")
 
-    function fetchData() {
-
+    function fetchData(source: { token: any; }) {
         axios.get<{ id: number; name: string; user: string }[]>('http://127.0.0.1:8000/api/datasets/', {
+            cancelToken: source.token,
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Token ${localStorage.getItem('token')}`,
             },
         }).then(res => {
-            const resData = res.data
-            resData.forEach(async (data) => {
-                if (datasets.some(e => e.id === data.id))
-                    return
-                await axios.get('http://127.0.0.1:8000/api/images/', {
-                    params: {
-                        dataset: data.id
-                    },
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Token ${localStorage.getItem('token')}`,
-                    },
-                }).then(res => {
-                    let newDataset: { id: number; name: string; image: string }
-                    if (res.data.length === 0) {
+            const resData = res.data;
+
+            // Sort the datasets by ID
+            resData.sort((a, b) => a.id - b.id);
+
+            // Use Promise.all to handle multiple asynchronous requests
+            Promise.all(resData.map(async (data) => {
+                if (!datasets.some(e => e.id === data.id)) {
+                    const imageRes = await axios.get('http://127.0.0.1:8000/api/images/', {
+                        cancelToken: source.token,
+                        params: {
+                            dataset: data.id
+                        },
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Token ${localStorage.getItem('token')}`,
+                        },
+                    });
+                    let newDataset: { id: number; name: string; image: string };
+                    if (imageRes.data.length === 0) {
                         newDataset = {
                             id: data.id,
                             name: data.name,
-                            image: 'https://www.svgrepo.com/show/451667/image-missing.svg'
-                        }
+                            image: missing
+                        };
                     } else {
-                        const first = res.data[0]
+                        const first = imageRes.data[0];
                         newDataset = {
                             id: data.id,
                             name: data.name,
                             image: first.image
-                        }
+                        };
                     }
-                    setDatasets(oldArray => [...oldArray, newDataset])
-                })
-            })
-        })
+                    setDatasets(oldArray => [...oldArray, newDataset]);
+                }
+            })).then(() => {
+                // Once all datasets are fetched and sorted, set the datasets state
+                setDatasets(oldDatasets => oldDatasets.sort((a, b) => a.id - b.id));
+            }).catch(error => {
+                console.error("Error fetching images:", error);
+            });
+        }).catch(error => {
+            console.error("Error fetching datasets:", error);
+        });
     }
 
 
@@ -71,69 +85,67 @@ function HomePage() {
         }).then(res => {
             setUsername(res.data.username)
             setPkUser(res.data.pk)
-            fetchData()
+            fetchData(source)
         }).catch(err => console.log(err))
         return function cleanup() {
             source.cancel()
         }
     }, []);
+
+
     useEffect(() => {
-        datasets.sort((a,b)=>a.id-b.id)
+        datasets.sort((a, b) => a.id - b.id)
     }, [datasets]);
+
     function logout() {
         localStorage.removeItem("token")
         navigate("../Login")
     }
 
     return (<>
-            <Button onClick={logout}>logout</Button>
-            <Navbar bg='secondary' expand="lg" style={{display: 'flex', justifyContent: 'center', height: '5rem'}}>
+            <Navbar bg='secondary' expand="lg" className="navbar">
                 <Navbar.Toggle aria-controls="basic-navbar-nav"/>
-                <Navbar.Collapse id="basic-navbar-nav" style={{textAlign: "center"}}>
+                <Navbar.Collapse id="basic-navbar-nav">
                     <Nav className="mr-auto">
-                        <Nav.Link>
-                            Yolov8
-                        </Nav.Link>
+                        <Nav.Link>Yolov8</Nav.Link>
                         <NavDropdown title={chosenDataset}>
-                            <NavDropdown.Item onClick={() => {
-                                setChosenDataset('Dog')
-                            }}>
-                                Dog
-                            </NavDropdown.Item>
-                            <NavDropdown.Item onClick={() => {
-                                setChosenDataset('Dataset')
-                            }}>
-                                Dataset
-                            </NavDropdown.Item>
+                            <NavDropdown.Item onClick={() => setChosenDataset('Dog')}>Dog</NavDropdown.Item>
+                            <NavDropdown.Item onClick={() => setChosenDataset('Dataset')}>Dataset</NavDropdown.Item>
                         </NavDropdown>
                         <Nav.Link>Start training</Nav.Link>
                     </Nav>
+                    <Button onClick={logout} className="logout-button">Logout</Button>
                 </Navbar.Collapse>
             </Navbar>
-            <div>
-                <h2 style={{display: 'flex', justifyContent: 'center'}}>Dataset Collection</h2>
-                <Container className="card-grid"
-                           style={{display: 'flex', flexDirection: 'row', columnGap: '5em', padding: '1rem'}}>
+            <div className="content">
+                <h2>Dataset Collection</h2>
+                <Container className="card-grid">
                     {datasets.map(dataset => (
-                        <ImageCard pathToImage={dataset.image}
-                                   name={dataset.name}
-                                   onClickFunction={() => {
-                                       navigate('../dataset?dataset=' + encodeURIComponent(dataset.name) + '&id=' + encodeURIComponent(dataset.id))
-                                   }}/>
+                        <ImageCard
+                            key={dataset.id}
+                            pathToImage={dataset.image}
+                            name={dataset.name}
+                            onClickFunction={() => navigate(`../dataset?dataset=${encodeURIComponent(dataset.name)}&id=${encodeURIComponent(dataset.id)}`)}
+                        />
                     ))}
-                    <ImageCard pathToImage={plus}
-                               name={'Add dataset'} onClickFunction={showAddDataset ? () => {
-                    } : () => setShowAddDataset(true)}/>
+                    <ImageCard
+                        pathToImage={plus}
+                        name={'Add dataset'}
+                        onClickFunction={showAddDataset ? () => {
+                        } : () => setShowAddDataset(true)}
+                    />
                 </Container>
             </div>
             {showAddDataset && (
-                <div className={'addDatasetForm'} style={{display: "flex", justifyContent: 'center'}}>
+                <div className={'addDatasetForm'}>
                     <Form onSubmit={async e => {
-                        e.preventDefault()
-                        const formData = new FormData(e.currentTarget)
+                        e.preventDefault();
+                        const formData = new FormData(e.currentTarget);
+                        const classes = String(formData.get('classes')).trim().split(',');
                         await axios.post('http://127.0.0.1:8000/api/datasets/', {
                             name: formData.get('name'),
-                            user: pkUser
+                            user: pkUser,
+                            classes: classes
                         }, {
                             headers: {
                                 'Content-Type': 'application/json',
@@ -143,15 +155,16 @@ function HomePage() {
                             console.log(err);
                         });
                         setShowAddDataset(false);
-                        fetchData()
+                        fetchData(axios.CancelToken.source());
                     }}>
-                        <Button onClick={() => setShowAddDataset(false)}>Close</Button>
+                        <Button onClick={() => setShowAddDataset(false)} className='close-btn'>X</Button>
                         <Form.Group>
-                            <Form.Control name='name' type="text" placeholder="Enter the new dataset name "/>
+                            <Form.Label>Enter the dataset name</Form.Label>
+                            <Form.Control name='name' type="text" placeholder="Name"/>
+                            <Form.Label>Enter the dataset classes separated by a comma</Form.Label>
+                            <Form.Control name='classes' type='text' placeholder='e.g. dog, cat,...'/>
                         </Form.Group>
-                        <Button variant="primary" type="submit">
-                            Submit
-                        </Button>
+                        <Button variant="primary" type="submit">Submit</Button>
                     </Form>
                 </div>
             )}

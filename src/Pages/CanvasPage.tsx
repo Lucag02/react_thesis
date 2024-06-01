@@ -1,8 +1,8 @@
 import React, {useRef, useEffect, useState} from 'react';
 import {useLocation} from "react-router-dom";
 import axios from "axios";
-import {Button} from "react-bootstrap";
-
+import { Button, Col, Container, Row } from 'react-bootstrap';
+import './Canvas.css'
 function CanvasPage() {
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
@@ -19,7 +19,7 @@ function CanvasPage() {
         y: number;
         width: number;
         height: number;
-        name?: string
+        name?: number
     }[]>([]);
     const [startPos, setStartPos] = useState<{ x: number; y: number }>({x: 0, y: 0});
     const [currentPos, setCurrentPos] = useState<{ x: number; y: number }>({x: 0, y: 0});
@@ -28,7 +28,13 @@ function CanvasPage() {
     const [currentRectangleIndex, setCurrentRectangleIndex] = useState<number | null>(null);
     const [canvasOffset, setCanvasOffset] = useState({x: 0, y: 0})
     const backgroundRef = useRef<HTMLImageElement>(null!);
+    const [labelID, setLabelID]=useState(0)
+    const [datasetClasses, setDatasetClasses]=useState<string[]>([])
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed(!sidebarCollapsed);
+  };
     function convertRectanglesToString(rectangles: any[]) {
         return rectangles.map(rect => {
             const x = (rect.x + rect.width / 2) / backgroundRef.current.width;
@@ -56,55 +62,59 @@ function CanvasPage() {
         });
     }
 
-    useEffect(() => {
-        const source = axios.CancelToken.source();
-
-        function fetchData() {
-            axios.get<{ id: number, file: string, image: number }[]>('http://127.0.0.1:8000/api/labels/', {
-                params: {image_id: imageID},
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Token ${localStorage.getItem('token')}`,
-                },
+    function fetchData(source: { token: any; }) {
+        axios.get<{ id: number, file: string, image: { dataset_classes:string[] } }[]>('http://127.0.0.1:8000/api/labels/', {
+            params: {image_id: imageID},
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Token ${localStorage.getItem('token')}`,
+            },
+            cancelToken: source.token,
+        }).then(res => {
+            const url = res.data[0].file
+            setLabelID(res.data[0].id)
+            setDatasetClasses(res.data[0].image.dataset_classes)
+            console.log(res.data)
+            axios.get(url, {
                 cancelToken: source.token,
+                responseType: 'text',
+                headers: {
+                    'Cache-Control': "max-age=0, no-cache, no-store, must-revalidate",
+                    'Pragma': "no-cache",
+                    'Expires': "Wed, 11 Jan 1984 05:00:00 GMT",
+                    'Content-Type': 'text/plain',
+                    'Authorization': `Token ${localStorage.getItem('token')}`,
+                }
             }).then(res => {
-                const url = res.data[0].file
-                console.log(url)
-                axios.get(url, {
-                    cancelToken: source.token,
-                    responseType: 'text',
-                    headers: {
-                        'Content-Type': 'text/plain',
-                        'Authorization': `Token ${localStorage.getItem('token')}`,
+                const text = res.data
+                if (text.trim() === '') {
+                    console.log("Text is empty. No rectangles created.");
+                    return;
+                }
+                const lines = text.trim().split('\n');
+                console.log(lines)
+                const newRectangles = lines.map((line: { split: (arg0: string) => [any, any, any, any, any]; }) => {
+                    const [id, x, y, w, h] = line.split(' ');
+                    return {
+                        x: (parseFloat(x) * backgroundRef.current.width) - (parseFloat(w) * backgroundRef.current.width) / 2,
+                        y: (parseFloat(y) * backgroundRef.current.height) - (parseFloat(h) * backgroundRef.current.height) / 2,
+                        width: parseFloat(w) * backgroundRef.current.width,
+                        height: parseFloat(h) * backgroundRef.current.height,
+                        name: id,
                     }
-                }).then(res => {
-                    const text = res.data
-                    if (text.trim() === '') {
-                        console.log("Text is empty. No rectangles created.");
-                        return;
-                    }
-                    const lines = text.trim().split('\n');
-                    console.log(lines)
-                    const newRectangles = lines.map((line: { split: (arg0: string) => [any, any, any, any, any]; }) => {
-                        const [id, x, y, w, h] = line.split(' ');
-                        return {
-                            x: (parseFloat(x) * backgroundRef.current.width) - (parseFloat(w) * backgroundRef.current.width) / 2,
-                            y: (parseFloat(y) * backgroundRef.current.height) - (parseFloat(h) * backgroundRef.current.height) / 2,
-                            width: parseFloat(w) * backgroundRef.current.width,
-                            height: parseFloat(h) * backgroundRef.current.height,
-                            name: id,
-                        }
-                    })
-                    setRectangles(oldArray => [...oldArray, ...newRectangles])
-                }).catch(err => {
-                    console.log(err)
                 })
-
+                setRectangles(oldArray => [...oldArray, ...newRectangles])
             }).catch(err => {
                 console.log(err)
             })
-        }
 
+        }).catch(err => {
+            console.log(err)
+        })
+    }
+
+    useEffect(() => {
+        const source = axios.CancelToken.source();
         if (!backgroundRef.current) {
             backgroundRef.current = new Image();
             if (imagePath) {
@@ -121,7 +131,7 @@ function CanvasPage() {
                 };
             }
         }
-        fetchData()
+        fetchData(source)
         return function cleanup() {
             source.cancel()
         }
@@ -149,8 +159,9 @@ function CanvasPage() {
                 ctx.beginPath();
                 ctx.rect(rect.x, rect.y, rect.width, rect.height);
                 ctx.stroke();
-                if (rect.name) {
-                    ctx.fillText(rect.name, rect.x, rect.y - 5);
+                if (rect.name!==undefined) {
+                    ctx.font = '1em Verdana'
+                    ctx.fillText(datasetClasses[rect.name], rect.x, rect.y - 5);
                 }
             });
 
@@ -191,8 +202,9 @@ function CanvasPage() {
         if (rectIndex >= 0) {
             const rect = rectangles[rectIndex];
             setCurrentRectangleIndex(rectIndex);
-            setInputPos({x: rect.x + rect.width, y: rect.y + rect.height});
-            setInputValue(rect.name || '');
+            setInputPos({x: rect.x, y: rect.y});
+            if(rect.name!==undefined) setInputValue(datasetClasses[rect.name]);
+            else setInputValue('')
             return;
         }
         setIsDrawing(true);
@@ -224,11 +236,16 @@ function CanvasPage() {
 
     const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter' && inputValue.trim() !== '') {
+            const index=datasetClasses.indexOf(inputValue.trim())
+            if(index===-1){
+                console.log('not allowed')
+                return
+            }
             const updatedRectangles = [...rectangles];
             if (currentRectangleIndex !== null) {
                 updatedRectangles[currentRectangleIndex] = {
                     ...updatedRectangles[currentRectangleIndex],
-                    name: inputValue.trim()
+                    name: index
                 };
                 setRectangles(updatedRectangles);
                 setInputPos(null);
@@ -240,12 +257,32 @@ function CanvasPage() {
             setInputValue('');
         }
     };
+
+    function startLabeling() {
+        console.log(labelID, datasetClasses)
+        axios.post('http://127.0.0.1:8000/api/labelSingleImage',{
+            image:imageID,
+            label:labelID,
+            datasetClasses:datasetClasses,
+        },{
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${localStorage.getItem('token')}`,
+                }
+            })
+    }
+
     return (
-        <>
-            <Button onClick={saveData}
-                    style={{position: 'absolute', top: window.innerHeight / 2, left: window.innerWidth / 10, zIndex:11}}>
-                Save
-            </Button>
+    <Container fluid>
+      <Row>
+        <Col md={3} className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+          <div className="sidebar-content">
+            <Button onClick={startLabeling} className="sidebar-button">Automatic label</Button>
+            <Button onClick={saveData} className="sidebar-button">Save</Button>
+          </div>
+           <Button onClick={toggleSidebar} className="toggle-sidebar-button" />
+        </Col>
+        <Col md={sidebarCollapsed ? 12 : 9}>
             <canvas
                 style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
                 ref={canvasRefBG}
@@ -268,16 +305,18 @@ function CanvasPage() {
                         position: 'absolute',
                         left: inputPos.x + canvasOffset.x,
                         top: inputPos.y + canvasOffset.y,
-                        zIndex: 10
-                    }}
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    onKeyDown={handleInputKeyDown}
-                    autoFocus
-                />
-            )}
-        </>
-    );
+                zIndex: 10
+              }}
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleInputKeyDown}
+              autoFocus
+            />
+          )}
+        </Col>
+      </Row>
+    </Container>
+  );
 }
 
 export default CanvasPage;

@@ -1,0 +1,46 @@
+.navbar {
+  justify-content: space-between;
+}
+
+.logout-button {
+  margin-left: auto;
+}
+
+.content {
+  margin-top: 20px;
+}
+
+.card-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.addDatasetForm {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 20px;
+  background-color: white;
+  border: 2px solid black;
+}
+
+.addDatasetForm form {
+  width: 100%;
+}
+
+.addDatasetForm button {
+  margin-top: 10px;
+}
+.close-btn{
+  position: absolute;
+  top:0;
+  right: 3%;
+  width: 10%;
+  color: black;
+  background: white;
+  --bs-btn-hover-bg: rgba(0.5,0.5,0.5,0.5);
+  border:white;
+}
