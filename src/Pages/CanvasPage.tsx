@@ -1,8 +1,9 @@
 import React, {useRef, useEffect, useState} from 'react';
 import {useLocation} from "react-router-dom";
 import axios from "axios";
-import { Button, Col, Container, Row } from 'react-bootstrap';
+import {Button, Col, Container, Row} from 'react-bootstrap';
 import './Canvas.css'
+
 function CanvasPage() {
     const location = useLocation();
     const searchParams = new URLSearchParams(location.search);
@@ -28,13 +29,39 @@ function CanvasPage() {
     const [currentRectangleIndex, setCurrentRectangleIndex] = useState<number | null>(null);
     const [canvasOffset, setCanvasOffset] = useState({x: 0, y: 0})
     const backgroundRef = useRef<HTMLImageElement>(null!);
-    const [labelID, setLabelID]=useState(0)
-    const [datasetClasses, setDatasetClasses]=useState<string[]>([])
+    const [labelID, setLabelID] = useState(0)
+    const [datasetClasses, setDatasetClasses] = useState<string[]>([])
     const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+    const intervalIdRef = useRef<NodeJS.Timeout>()
+    const toggleSidebar = () => {
+        setSidebarCollapsed(!sidebarCollapsed);
+    };
 
-  const toggleSidebar = () => {
-    setSidebarCollapsed(!sidebarCollapsed);
-  };
+    async function checkTaskProgress(taskId: any) {
+        try {
+            axios.get(`http://127.0.0.1:8000/api/taskStatus`, {
+                params: {
+                    task_id: taskId
+                }
+            }).then(res => {
+                const {state} = res.data;
+                if (state === 'PENDING') console.log('pending')
+                if (state === 'PROGRESS') {
+                    console.log(`Working`);
+                } else if (state === 'SUCCESS') {
+                    console.log('Task completed');
+                    clearInterval(intervalIdRef.current)
+                    fetchData(axios.CancelToken.source())
+                } else if (state === 'FAILURE') {
+                    console.log('Task failed.')
+                    clearInterval(intervalIdRef.current)
+                }
+            })
+        } catch (error) {
+            console.error('Error checking task progress:', error);
+        }
+    }
+
     function convertRectanglesToString(rectangles: any[]) {
         return rectangles.map(rect => {
             const x = (rect.x + rect.width / 2) / backgroundRef.current.width;
@@ -63,7 +90,12 @@ function CanvasPage() {
     }
 
     function fetchData(source: { token: any; }) {
-        axios.get<{ id: number, file: string, image: { dataset_classes:string[] } }[]>('http://127.0.0.1:8000/api/labels/', {
+        setRectangles([])
+        axios.get<{
+            id: number,
+            file: string,
+            image: { dataset_classes: string[] }
+        }[]>('http://127.0.0.1:8000/api/labels/', {
             params: {image_id: imageID},
             headers: {
                 'Content-Type': 'application/json',
@@ -159,7 +191,7 @@ function CanvasPage() {
                 ctx.beginPath();
                 ctx.rect(rect.x, rect.y, rect.width, rect.height);
                 ctx.stroke();
-                if (rect.name!==undefined) {
+                if (rect.name !== undefined) {
                     ctx.font = '1em Verdana'
                     ctx.fillText(datasetClasses[rect.name], rect.x, rect.y - 5);
                 }
@@ -181,14 +213,15 @@ function CanvasPage() {
         const x = currentPos.x
         const y = currentPos.y
         let collisionDetected = false
+        const border=7
         for (let index = 0; index < rectangles.length; index++) {
             const rect = rectangles[index];
             const rectX = rect.x
             const rectY = rect.y
             const width = rect.width
             const height = rect.height
-            const topBottom = (x >= rectX) && (x <= rectX + width) && ((y <= rectY + 5 && y >= rectY - 5) || (y <= rectY + height + 5 && y >= rectY + height - 5))
-            const leftRight = (y > rectY) && (y < rectY + height) && ((x <= rectX + 5 && x >= rectX - 5) || (x <= rectX + width + 5 && x >= rectX + width - 5))
+            const topBottom = (x >= rectX) && (x <= rectX + width) && ((y <= rectY + border && y >= rectY - border) || (y <= rectY + height + border && y >= rectY + height - border))
+            const leftRight = (y > rectY) && (y < rectY + height) && ((x <= rectX + border && x >= rectX - border) || (x <= rectX + width + border && x >= rectX + width - border))
             collisionDetected = topBottom || leftRight
             if (collisionDetected)
                 return index
@@ -203,7 +236,7 @@ function CanvasPage() {
             const rect = rectangles[rectIndex];
             setCurrentRectangleIndex(rectIndex);
             setInputPos({x: rect.x, y: rect.y});
-            if(rect.name!==undefined) setInputValue(datasetClasses[rect.name]);
+            if (rect.name !== undefined) setInputValue(datasetClasses[rect.name]);
             else setInputValue('')
             return;
         }
@@ -220,11 +253,15 @@ function CanvasPage() {
     const handleMouseUp = () => {
         if (inputPos) return;
         setIsDrawing(false);
+        const width=(currentPos.x - startPos.x) > 0 ? currentPos.x - startPos.x : startPos.x - currentPos.x
+        const height=(currentPos.y - startPos.y) > 0 ? currentPos.y - startPos.y : startPos.y - currentPos.y
+        const minDim=2
+        if(width<minDim||height<minDim) return;
         const newRectangle = {
             x: startPos.x < currentPos.x ? startPos.x : currentPos.x,
             y: startPos.y < currentPos.y ? startPos.y : currentPos.y,
-            width: (currentPos.x - startPos.x) > 0 ? currentPos.x - startPos.x : startPos.x - currentPos.x,
-            height: (currentPos.y - startPos.y) > 0 ? currentPos.y - startPos.y : startPos.y - currentPos.y
+            width: width,
+            height: height
         };
         setRectangles([...rectangles, newRectangle]);
         setInputPos({x: currentPos.x, y: currentPos.y});
@@ -236,8 +273,8 @@ function CanvasPage() {
 
     const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter' && inputValue.trim() !== '') {
-            const index=datasetClasses.indexOf(inputValue.trim())
-            if(index===-1){
+            const index = datasetClasses.indexOf(inputValue.trim())
+            if (index === -1) {
                 console.log('not allowed')
                 return
             }
@@ -252,7 +289,7 @@ function CanvasPage() {
                 setInputValue('');
             }
         } else if (event.key === 'Escape') {
-            setRectangles(prevReactangles => prevReactangles.filter((_, index) => index !== currentRectangleIndex))
+            setRectangles(prevRectangles => prevRectangles.filter((_, index) => index !== currentRectangleIndex))
             setInputPos(null);
             setInputValue('');
         }
@@ -260,63 +297,66 @@ function CanvasPage() {
 
     function startLabeling() {
         console.log(labelID, datasetClasses)
-        axios.post('http://127.0.0.1:8000/api/labelSingleImage',{
-            image:imageID,
-            label:labelID,
-            datasetClasses:datasetClasses,
-        },{
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Token ${localStorage.getItem('token')}`,
-                }
-            })
+        axios.post('http://127.0.0.1:8000/api/labelSingleImage', {
+            image: imageID,
+            label: labelID,
+            datasetClasses: datasetClasses,
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Token ${localStorage.getItem('token')}`,
+            }
+        }).then(res => {
+            const id=res.data.task_id
+            intervalIdRef.current = setInterval(() => checkTaskProgress(id), 1000);
+        })
     }
 
     return (
-    <Container fluid>
-      <Row>
-        <Col md={3} className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-          <div className="sidebar-content">
-            <Button onClick={startLabeling} className="sidebar-button">Automatic label</Button>
-            <Button onClick={saveData} className="sidebar-button">Save</Button>
-          </div>
-           <Button onClick={toggleSidebar} className="toggle-sidebar-button" />
-        </Col>
-        <Col md={sidebarCollapsed ? 12 : 9}>
-            <canvas
-                style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
-                ref={canvasRefBG}
-                width={canvasSize.width}
-                height={canvasSize.height}
-            />
-            <canvas
-                style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
-                ref={canvasRef}
-                width={canvasSize.width}
-                height={canvasSize.height}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-            />
-            {inputPos && (
-                <input
-                    type="text"
-                    style={{
-                        position: 'absolute',
-                        left: inputPos.x + canvasOffset.x,
-                        top: inputPos.y + canvasOffset.y,
-                zIndex: 10
-              }}
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleInputKeyDown}
-              autoFocus
-            />
-          )}
-        </Col>
-      </Row>
-    </Container>
-  );
+        <Container fluid>
+            <Row>
+                <Col md={3} className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+                    <div className="sidebar-content">
+                        <Button onClick={startLabeling} className="sidebar-button">Automatic label</Button>
+                        <Button onClick={saveData} className="sidebar-button">Save</Button>
+                    </div>
+                    <Button onClick={toggleSidebar} className="toggle-sidebar-button"/>
+                </Col>
+                <Col md={sidebarCollapsed ? 12 : 9}>
+                    <canvas
+                        style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
+                        ref={canvasRefBG}
+                        width={canvasSize.width}
+                        height={canvasSize.height}
+                    />
+                    <canvas
+                        style={{position: 'absolute', top: canvasOffset.y, left: canvasOffset.x,}}
+                        ref={canvasRef}
+                        width={canvasSize.width}
+                        height={canvasSize.height}
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                    />
+                    {inputPos && (
+                        <input
+                            type="text"
+                            style={{
+                                position: 'absolute',
+                                left: inputPos.x + canvasOffset.x,
+                                top: inputPos.y + canvasOffset.y,
+                                zIndex: 10
+                            }}
+                            value={inputValue}
+                            onChange={handleInputChange}
+                            onKeyDown={handleInputKeyDown}
+                            autoFocus
+                        />
+                    )}
+                </Col>
+            </Row>
+        </Container>
+    );
 }
 
 export default CanvasPage;

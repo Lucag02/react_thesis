@@ -14,7 +14,9 @@ export default function DatasetPage() {
     const datasetName = searchParams.get('dataset');
     const datasetId = searchParams.get('id')
     const [images, setImages] = useState<{ id: number, url: string }[]>([])
+    const [folderName, setFolderName] = useState<string>('train')
     const intervalIdRef = useRef<NodeJS.Timeout>()
+
     function fetchData() {
         axios.get('http://127.0.0.1:8000/api/images/', {
             params: {
@@ -39,7 +41,7 @@ export default function DatasetPage() {
         formData.forEach(function (image) {
             console.log(image)
             axios.post('http://127.0.0.1:8000/api/images/', {
-                folder_name: 'train',
+                folder_name: folderName,
                 dataset: datasetId,
                 image: image,
             }, {
@@ -48,6 +50,23 @@ export default function DatasetPage() {
                     'Authorization': `Token ${localStorage.getItem('token')}`,
                 },
             }).then(fetchData)
+                .catch(err => {
+                    console.log(err)
+                })
+        })
+    }
+
+    function startTraining() {
+        axios.post('http://127.0.0.1:8000/api/startTraining', {
+            dataset: datasetId
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Token ${localStorage.getItem('token')}`,
+            }
+        }).then(res => {
+            const id = res.data.task_id
+            intervalIdRef.current = setInterval(() => checkTaskProgress(id), 1000);
         })
     }
 
@@ -60,9 +79,32 @@ export default function DatasetPage() {
                 'Authorization': `Token ${localStorage.getItem('token')}`,
             }
         }).then(res => {
-            const id=res.data.task_id
+            const id = res.data.task_id
             intervalIdRef.current = setInterval(() => checkTaskProgress(id), 1000);
         })
+    }
+
+    async function downloadNetwork() {
+        try {
+            const response = await axios.get(`http://127.0.0.1:8000/api/download/${datasetId}/`, {
+                responseType: 'blob',
+            });
+
+            const blob = new Blob([response.data], {type: response.headers['content-type']});
+            const url = window.URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            if(datasetName)
+                link.setAttribute('download', datasetName+'.pt');
+            document.body.appendChild(link);
+            link.click();
+
+            link.parentNode?.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error('Error downloading the file', error);
+        }
     }
 
     async function checkTaskProgress(taskId: any) {
@@ -73,7 +115,7 @@ export default function DatasetPage() {
                 }
             }).then(res => {
                 const {state, meta} = res.data;
-                if(state==='PENDING') console.log('pending')
+                if (state === 'PENDING') console.log('pending')
                 if (state === 'PROGRESS') {
                     console.log(`Progress: ${meta.current} / ${meta.total}`);
                 } else if (state === 'SUCCESS') {
@@ -92,6 +134,9 @@ export default function DatasetPage() {
     useEffect(() => {
         fetchData()
     }, []);
+    const handleOptionChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        setFolderName(event.target.value);
+    };
     return (
         <>
             <h1>{datasetName}</h1>
@@ -105,12 +150,39 @@ export default function DatasetPage() {
                             accept="image/jpeg,image/png,image/gif"/>
                     </Form.Group>
                 </Row>
+                <Row>
+                    <Form.Group className="mb-3">
+                        <Form.Label>Choose which folder the images are going to be uploaded to:</Form.Label>
+                        <div>
+                            <Form.Check
+                                name="radioButton"
+                                type="radio"
+                                label="train"
+                                value="train"
+                                checked={folderName === 'train'}
+                                onChange={handleOptionChange}
+                                inline
+                            />
+                            <Form.Check
+                                name="radioButton"
+                                type="radio"
+                                label="val"
+                                value="val"
+                                checked={folderName === 'val'}
+                                onChange={handleOptionChange}
+                                inline
+                            />
+                        </div>
+                    </Form.Group>
+                </Row>
                 <Button
                     variant="primary"
                     type="submit">
                     Submit
                 </Button>
             </Form>
+            <Button style={{position: 'absolute', top: 0, right: 150}} onClick={downloadNetwork}>Download network</Button>
+            <Button style={{position: 'absolute', top: 0, right: 325}} onClick={startTraining}>Start training</Button>
             <Button style={{position: 'absolute', top: 0, right: 0}} onClick={startLabeling}>Automatic labels</Button>
             <Container className="card-grid"
                        style={{
